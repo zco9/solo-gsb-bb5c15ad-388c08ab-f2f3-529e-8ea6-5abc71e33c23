@@ -22,8 +22,8 @@
     </section>
     <section class="panel">
       <h2>参与演练</h2>
-      <p class="hint">输入主持人分享的 6 位房间码，实时接收情景注入。</p>
-      <input id="join-code" type="text" placeholder="房间码" maxlength="6" autocomplete="off">
+      <p class="hint">输入主持人分享的 6 位<strong>组加入码</strong>，仅接收本组与全员的情景注入。</p>
+      <input id="join-code" type="text" placeholder="组加入码" maxlength="6" autocomplete="off">
       <button id="btn-join" class="primary">加入演练</button>
       <p id="landing-error" class="error"></p>
     </section>
@@ -34,7 +34,11 @@
     <section class="room-head panel">
       <div>
         <div class="room-name" id="room-name"></div>
-        <div class="room-code">房间码 <button id="room-code" class="code-chip" title="点击复制"></button></div>
+        <div class="room-code">
+          <span id="room-code-label">房间码</span>
+          <button id="room-code" class="code-chip" title="点击复制"></button>
+          <span id="player-group" class="group-self hidden"></span>
+        </div>
       </div>
       <div class="clock-box">
         <div id="clock" class="clock">00:00:00</div>
@@ -51,13 +55,23 @@
         <button id="btn-resume" class="primary">继续</button>
         <button id="btn-reset"  class="danger">重置</button>
       </div>
+
+      <h3>参与分组（2～8 组，各组独立加入码）</h3>
+      <form id="group-form" class="group-form">
+        <input id="group-name" type="text" placeholder="参与组名称，如：A 组 / DBA 组" maxlength="80">
+        <button type="submit" class="primary">新建分组</button>
+      </form>
+      <p id="group-form-hint" class="hint"></p>
+      <ul id="group-list" class="group-list"></ul>
+
       <h3>添加注入卡片</h3>
       <form id="card-form">
         <div class="form-row">
           <input id="card-title" type="text" placeholder="卡片标题，如：告警风暴出现" required maxlength="200">
           <input id="card-trigger" type="number" min="0" max="86400" step="1" placeholder="触发秒数" required title="相对演练开始的秒数">
         </div>
-        <textarea id="card-content" rows="2" placeholder="注入内容 / 情景描述（参与者可见）" maxlength="4000"></textarea>
+        <select id="card-target" title="卡片目标：全员或某个参与组"></select>
+        <textarea id="card-content" rows="2" placeholder="注入内容 / 情景描述（目标参与者可见）" maxlength="4000"></textarea>
         <button type="submit" class="primary">添加卡片</button>
         <span id="card-form-hint" class="hint"></span>
       </form>

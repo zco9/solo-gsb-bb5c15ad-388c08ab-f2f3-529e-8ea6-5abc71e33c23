@@ -141,3 +141,65 @@ button:disabled { opacity: .35; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 400;
 }
+
+/* 分组管理 */
+.group-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-bottom: 6px; }
+.group-form input { margin-bottom: 0; }
+.group-list { list-style: none; margin: 8px 0 4px; padding: 0; }
+.group-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.group-name-input {
+  flex: 1;
+  margin: 0;
+  background: transparent;
+  border-color: transparent;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+.group-name-input:focus { border-color: var(--accent); background: var(--panel); }
+.group-code {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  letter-spacing: 2px;
+  font-size: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.group-actions { display: flex; gap: 6px; }
+.group-actions button { padding: 5px 12px; font-size: 12px; font-weight: 400; }
+.group-ref { font-size: 12px; color: var(--muted); }
+
+select {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+  margin-bottom: 10px;
+  font-family: inherit;
+}
+select:focus { outline: 1px solid var(--accent); }
+
+.badge-target {
+  background: rgba(77, 163, 255, .15);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  margin-right: 6px;
+}
+.badge-target.target-all { background: rgba(139, 150, 173, .15); color: var(--muted); }
+.group-self { color: var(--accent); font-size: 13px; margin-left: 10px; font-weight: 600; }
