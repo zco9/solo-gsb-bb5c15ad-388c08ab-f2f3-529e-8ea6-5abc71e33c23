@@ -6,16 +6,21 @@
  * 1. 打开 WebSocket 时带上 last_event_id（已应用的最大事件 ID）；
  * 2. 服务端先推权威快照（snapshot）——全量替换本地状态，水位 = snapshot.last_event_id；
  * 3. 之后只应用 id > 水位的增量事件，旧事件一律丢弃，状态绝不回退。
+ *
+ * 分组定向：主持人用房间码连接（全量视野），参与者用组加入码连接；
+ * 服务端已按组过滤快照与事件，未命中本组的卡片不会到达本端。
  */
 
 const $ = (sel) => document.querySelector(sel);
 
 const state = {
-  code: null,
-  role: null, // 'host' | 'player'
+  code: null,      // 主持人 = 房间码；参与者 = 组加入码
+  role: null,      // 'host' | 'player'
   roomName: '',
   status: 'idle',
   cards: [],
+  groups: [],      // 主持人：全部参与组；参与者：仅本组
+  groupId: null,   // 参与者本组 id（主持人为 null）
   lastEventId: 0,
   clock: { status: 'idle', elapsedMs: 0, syncedAt: performance.now() },
   ws: null,
@@ -48,12 +53,24 @@ function fmt(ms) {
   return `${h}:${m}:${sec}`;
 }
 
+function groupName(id) {
+  const g = state.groups.find((g) => g.id === id);
+  return g ? g.name : `#${id}`;
+}
+
 function renderMeta() {
   $('#room-name').textContent = state.roomName || '未命名演练';
   $('#room-code').textContent = state.code;
   const st = $('#status');
   st.textContent = STATUS_TEXT[state.status] || state.status;
   st.className = 'status' + (state.status === 'running' ? ' running' : state.status === 'paused' ? ' paused' : '');
+  const pg = $('#player-group');
+  if (state.role === 'player' && state.groupId != null) {
+    pg.textContent = `参与组：${groupName(state.groupId)}`;
+    pg.classList.remove('hidden');
+  } else {
+    pg.classList.add('hidden');
+  }
   renderControls();
 }
 
@@ -65,8 +82,77 @@ function renderControls() {
   $('#btn-resume').disabled = s !== 'paused';
   $('#btn-reset').disabled = s === 'idle';
   const editing = s !== 'running';
-  $('#card-form').querySelectorAll('input, textarea, button').forEach((el) => { el.disabled = !editing; });
+  $('#card-form').querySelectorAll('input, textarea, select, button').forEach((el) => { el.disabled = !editing; });
   $('#card-form-hint').textContent = editing ? '' : '时钟运行中，暂停后才能编辑卡片';
+}
+
+/* 主持人：参与组列表 + 卡片目标下拉 */
+function renderGroups() {
+  if (state.role !== 'host') return;
+  $('#group-count').textContent = state.groups.length;
+  const list = $('#group-list');
+  list.innerHTML = '';
+  for (const g of state.groups) {
+    const li = document.createElement('li');
+    li.className = 'group-item';
+
+    const name = document.createElement('span');
+    name.className = 'group-name';
+    name.textContent = g.name;
+    li.appendChild(name);
+
+    const code = document.createElement('button');
+    code.className = 'code-chip group-code';
+    code.textContent = g.join_code;
+    code.title = '点击复制加入码';
+    code.onclick = () => {
+      navigator.clipboard?.writeText(g.join_code);
+      code.textContent = '已复制';
+      setTimeout(() => { code.textContent = g.join_code; }, 1200);
+    };
+    li.appendChild(code);
+
+    const rename = document.createElement('button');
+    rename.className = 'group-op';
+    rename.textContent = '改名';
+    rename.onclick = async () => {
+      const name2 = (prompt('新的组名称', g.name) || '').trim();
+      if (!name2 || name2 === g.name) return;
+      try {
+        await api('PATCH', `/api/rooms/${state.code}/groups/${g.id}`, { name: name2 });
+      } catch (err) { showError(err); }
+    };
+    li.appendChild(rename);
+
+    const del = document.createElement('button');
+    del.className = 'group-op group-del';
+    del.textContent = '删除';
+    del.onclick = async () => {
+      if (!confirm(`删除参与组「${g.name}」？其加入码将立即失效。`)) return;
+      try {
+        await api('DELETE', `/api/rooms/${state.code}/groups/${g.id}`);
+      } catch (err) { showError(err); }
+    };
+    li.appendChild(del);
+
+    list.appendChild(li);
+  }
+
+  // 卡片目标下拉：全员 + 各参与组；尽量保留当前选择
+  const sel = $('#card-target');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = '全员';
+  sel.appendChild(all);
+  for (const g of state.groups) {
+    const opt = document.createElement('option');
+    opt.value = String(g.id);
+    opt.textContent = `仅：${g.name}`;
+    sel.appendChild(opt);
+  }
+  sel.value = [...sel.options].some((o) => o.value === cur) ? cur : '';
 }
 
 function sortedCards() {
@@ -91,7 +177,15 @@ function renderCards() {
     const meta = document.createElement('div');
     meta.className = 'card-meta';
     const left = document.createElement('span');
-    left.innerHTML = `<span class="card-trigger">T+${fmt(card.trigger_seconds * 1000)}</span> · #${card.seq}`;
+    const trig = document.createElement('span');
+    trig.className = 'card-trigger';
+    trig.textContent = `T+${fmt(card.trigger_seconds * 1000)}`;
+    left.appendChild(trig);
+    left.appendChild(document.createTextNode(` · #${card.seq} `));
+    const target = document.createElement('span');
+    target.className = 'badge ' + (card.group_id == null ? 'badge-all' : 'badge-target');
+    target.textContent = card.group_id == null ? '全员' : `仅 ${groupName(card.group_id)}`;
+    left.appendChild(target);
     meta.appendChild(left);
 
     const right = document.createElement('span');
@@ -127,6 +221,7 @@ function renderCards() {
 
 function renderAll() {
   renderMeta();
+  renderGroups();
   renderCards();
 }
 
@@ -148,6 +243,8 @@ function syncClock(status, elapsedMs) {
 function applySnapshot(msg) {
   state.roomName = msg.room.name;
   state.cards = msg.cards;
+  state.groups = msg.groups || [];
+  state.groupId = msg.scope && msg.scope.role === 'player' ? msg.scope.group_id : null;
   state.lastEventId = msg.last_event_id; // 权威水位
   syncClock(msg.room.status, msg.room.elapsed_ms);
   renderAll();
@@ -170,6 +267,17 @@ function applyEvent(msg) {
       else state.cards.push(p);
       break;
     }
+    case 'group_added':
+      if (!state.groups.some((g) => g.id === p.id)) state.groups.push(p);
+      break;
+    case 'group_renamed': {
+      const g = state.groups.find((g) => g.id === p.id);
+      if (g) g.name = p.name;
+      break;
+    }
+    case 'group_removed':
+      state.groups = state.groups.filter((g) => g.id !== p.id);
+      break;
     case 'clock':
       syncClock(p.status, p.elapsed_ms);
       break;
@@ -225,9 +333,11 @@ async function api(method, path, body) {
 }
 
 function showError(err) {
-  const el = $('#landing-error');
-  el.textContent = err.message || String(err);
-  setTimeout(() => { el.textContent = ''; }, 4000);
+  for (const sel of ['#landing-error', '#room-error']) {
+    const el = $(sel);
+    el.textContent = err.message || String(err);
+    setTimeout(() => { el.textContent = ''; }, 4000);
+  }
 }
 
 /* ---------------------------------------------------------- 流程 */
@@ -237,6 +347,8 @@ function enterRoom(code, role) {
   state.role = role;
   state.lastEventId = 0;
   state.cards = [];
+  state.groups = [];
+  state.groupId = null;
   location.hash = `#/${role}/${code}`;
   localStorage.setItem(`inject-role-${code}`, role);
   showRoom();
@@ -263,9 +375,9 @@ $('#btn-join').onclick = async () => {
   const code = $('#join-code').value.trim().toUpperCase();
   if (!code) return;
   try {
-    await api('GET', `/api/rooms/${code}`);
+    await api('GET', `/api/join/${code}`);
     enterRoom(code, 'player');
-  } catch (err) { showError(new Error('房间不存在，请检查房间码')); }
+  } catch (err) { showError(new Error('加入码无效，请向主持人确认组加入码')); }
 };
 
 $('#room-code').onclick = () => {
@@ -279,12 +391,24 @@ $('#btn-pause').onclick  = () => api('POST', `/api/rooms/${state.code}/pause`).c
 $('#btn-resume').onclick = () => api('POST', `/api/rooms/${state.code}/resume`).catch(showError);
 $('#btn-reset').onclick  = () => api('POST', `/api/rooms/${state.code}/reset`).catch(showError);
 
+$('#group-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $('#group-name').value.trim();
+  if (!name) return;
+  try {
+    await api('POST', `/api/rooms/${state.code}/groups`, { name });
+    $('#group-name').value = '';
+    $('#group-name').focus();
+  } catch (err) { showError(err); }
+};
+
 $('#card-form').onsubmit = async (e) => {
   e.preventDefault();
   const body = {
     title: $('#card-title').value.trim(),
     content: $('#card-content').value.trim(),
     trigger_seconds: parseInt($('#card-trigger').value, 10) || 0,
+    group_id: $('#card-target').value ? parseInt($('#card-target').value, 10) : null,
   };
   try {
     await api('POST', `/api/rooms/${state.code}/cards`, body);
